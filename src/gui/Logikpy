@@ -1,0 +1,167 @@
+import logging
+import math
+import random
+import time
+import json
+import os
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait, Select
+from selenium.webdriver.support import expected_conditions as EC
+from logging.handlers import RotatingFileHandler
+from dotenv import load_dotenv
+from tqdm import tqdm
+from selenium.webdriver.chrome.service import Service
+import winsound
+
+# 加载环境变量
+load_dotenv()
+
+# 从环境变量中读取配置参数
+APPOINTMENT_URL = os.getenv('APPOINTMENT_URL', 'https://terminvereinbarung.muenchen.de/abh/termin/?cts=1000113')
+CHECK_INTERVAL = int(os.getenv('CHECK_INTERVAL', 30))
+RESTART_INTERVAL = int(os.getenv('RESTART_INTERVAL', 60))
+WAIT_TIMEOUT = int(os.getenv('WAIT_TIMEOUT', 10))
+
+# 配置日志
+def configure_logging():
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+
+    def create_handler(file_name, level):
+        handler = RotatingFileHandler(file_name, maxBytes=10 * 1024 * 1024, backupCount=5, encoding='utf-8')
+        handler.setLevel(level)
+        handler.setFormatter(formatter)
+        return handler
+
+    app_logger = logging.getLogger('app_logger')
+    app_logger.setLevel(logging.DEBUG)
+    app_logger.addHandler(create_handler('app_log.log', logging.DEBUG))
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(formatter)
+    app_logger.addHandler(console_handler)
+
+    selenium_logger = logging.getLogger('selenium.webdriver.remote.remote_connection')
+    selenium_logger.setLevel(logging.WARNING)
+    selenium_logger.addHandler(create_handler('selenium_log.log', logging.WARNING))
+
+    urllib3_logger = logging.getLogger('urllib3.connectionpool')
+    urllib3_logger.setLevel(logging.DEBUG)
+    urllib3_logger.addHandler(create_handler('urllib3_log.log', logging.DEBUG))
+
+# 播放警报声音
+def play_alert_sound():
+    frequency = 1500  # 设置频率，单位为Hz
+    duration = 1000  # 设置持续时间，单位为ms
+    while True:
+        winsound.Beep(frequency, duration)
+        time.sleep(1)
+
+def setup_driver():
+    options = webdriver.ChromeOptions()
+    #options.add_argument('--headless')
+    options.add_argument('--disable-gpu')
+    options.add_argument('--no-sandbox')
+    options.add_argument('--disable-dev-shm-usage')
+    options.add_argument('log-level=3')
+
+    driver = webdriver.Chrome(options=options)
+    return driver
+
+def load_appointment_page(driver):
+    driver.get(APPOINTMENT_URL)
+    select_element = WebDriverWait(driver, WAIT_TIMEOUT).until(
+        EC.presence_of_element_located((By.NAME, "CASETYPES[Notfalltermin UA 35]"))
+    )
+    return select_element
+
+def select_appointment_type(driver, select_element):
+    select = Select(select_element)
+    # select.options[1].click()
+
+    select.select_by_value('1')
+    weiter_button = WebDriverWait(driver, WAIT_TIMEOUT).until(
+        EC.element_to_be_clickable(
+            (By.XPATH, '//input[@value="Weiter" and @type="submit" and contains(@class, "WEB_APPOINT_FORWARDBUTTON")]')
+        ))
+    weiter_button.click()
+
+def extract_json_data(driver):
+    scripts = driver.find_elements(By.TAG_NAME, 'script')
+    for script in scripts:
+        script_content = script.get_attribute('innerHTML')
+        if 'var jsonAppoints' in script_content:
+            json_data_start = script_content.find('{')
+            json_data_end = script_content.rfind('}') + 1
+            json_data = script_content[json_data_start:json_data_end]
+            return json.loads(json_data)
+    return None
+
+def check_appointments(driver):
+    app_logger = logging.getLogger('app_logger')
+    try:
+        select_element = load_appointment_page(driver)
+        app_logger.debug("Select element found")
+        select_appointment_type(driver, select_element)
+        parsed_data = extract_json_data(driver)
+
+        if parsed_data:
+            app_logger.debug(f"JSON data: {parsed_data}")
+            available_appointments = parsed_data['LOADBALANCER']['appoints'].values()
+            app_logger.info(f"Verfuegbare Termine: {available_appointments}")
+            for key, value in parsed_data['LOADBALANCER']['appoints'].items():
+                if  value:
+                    app_logger.info("Termin verfügbar!")
+                    app_logger.info(f"Original JSON data: {json.dumps(parsed_data, indent=2)}")
+
+                    with open('source.html', 'w', encoding='utf-8') as f:
+                        f.write(driver.page_source)
+
+                    print(f"\033[92m[{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}] Termin verfügbar!\033[0m")
+
+                    play_alert_sound()
+
+                    return True
+        else:
+            app_logger.warning("No appointment JSON data found")
+    except Exception as e:
+        app_logger.error(f"An error occurred: {e}", exc_info=True)
+        raise e
+    return False
+
+def main():
+    print("\033[92m" + "=" * 50)
+    configure_logging()
+    app_logger = logging.getLogger('app_logger')
+    driver = setup_driver()
+    termin_verfuegbar = False
+
+
+    while not termin_verfuegbar:
+        try:
+            app_logger.info("Checking for available appointments...")
+            termin_verfuegbar = check_appointments(driver)
+            if not termin_verfuegbar:
+                app_logger.info(f"Termin nicht verfügbar, warte {CHECK_INTERVAL} Sekunden")
+
+                random_CHECK_INTERVAL = random.randint(CHECK_INTERVAL - 10, CHECK_INTERVAL + 10)
+                print(
+                    f"\033[93m[{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}] Termin nicht verfügbar, warte {random_CHECK_INTERVAL} Sekunden\033[0m")
+                for _ in tqdm(range(100), desc="Waiting", ncols=75, bar_format="{l_bar}{bar} | {remaining}"):
+                    time.sleep(random_CHECK_INTERVAL/100)
+        except Exception:
+            driver.close()
+            driver.quit()
+
+
+            app_logger.info(f"Restarting driver in {RESTART_INTERVAL} seconds...")
+            print(
+                f"\033[91m[{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}] Restarting driver in {RESTART_INTERVAL} seconds...\033[0m")
+            for _ in tqdm(range(100), desc="Restarting", ncols=75,
+                          bar_format="{l_bar}{bar} | {remaining}"):
+                time.sleep(RESTART_INTERVAL/100)
+            driver = setup_driver()
+
+
+if __name__ == "__main__":
+    main()
