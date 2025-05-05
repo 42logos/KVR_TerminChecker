@@ -19,7 +19,7 @@
 ## Features
 
 * **Automated Appointment Checking:**
-  Never miss an available slot at the Munich registration office with our reliable scheduler.
+  Never miss an available slot at the Munich registration office with our reliable Auto-Checker.
 * **Dual Modes:**
   Choose between the power of a CLI or a user-friendly GUI for maximum flexibility.
 * **Service-Ready:**
