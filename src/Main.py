@@ -27,6 +27,7 @@ import random
 
 import threading
 logger.remove()  # 移除默认的日志处理器
+
 logger.add(
     sink="logs/{time:YYYY-MM-DD}.log",
     level="DEBUG",
@@ -38,6 +39,7 @@ logger.add(
 logger.add(
         sink=sys.stdout,
         level="INFO",
+        encoding="utf-8",
 
     )
 
@@ -134,6 +136,7 @@ def click_day(table, day: int):
     在已定位到的日历 shadow_root（或 container）中，
     查找日期为 day 的按钮并点击它。
     """
+    logger.info("  尝试点击日期: {}", day)
     # 1) 用 XPath 找到包含数字的 <div>，然后拿它的父 <button>
     btn = table.find_element(
         By.XPATH,
@@ -141,7 +144,7 @@ def click_day(table, day: int):
     )
     # 2) 点击按钮
     btn.click()
-    logger.debug("  点击日期 {} 成功", day)
+    logger.info("  点击日期 {} 成功", day)
     # 3) 等待弹窗出现
 
 # ─────────── 工具：保存当前完整网页源代码 以供分析 ───────────
@@ -200,10 +203,12 @@ def check_once(driver, date: str):
 
         # 日历组件 <zms-calendar> 也在 Shadow DOM
         logger.info("尝试加载日历组件 …")
+        # driver.get("E:\Programming_Projects\KVR_TerminChecker\page_source_7.html") # 模拟加载本地文件
         calendar = get_shadow_element(
             driver,
             inner_css="table",           # 只为了拿到 shadowRoot
         )
+        # calendar = driver.find_element(By.CSS_SELECTOR, "table")
         save_page_source(driver, "page_source_calendar.html")
         logger.info("日历组件已加载")
         
@@ -213,9 +218,11 @@ def check_once(driver, date: str):
         for day in range(1, 32):
             if is_day_enabled(calendar, day):
                 logger.info("日期 {} 可用", day)
-                save_page_source(driver, f"page_source_{day}.html")
+                save_page_source(driver, f"page_source_{day}.html")  
                 available_dates.append(day)
                 click_day(calendar, day)
+                save_page_source(driver, f"page_source_{day}_clicked.html")
+                # 点击日期按钮后，可能会弹出一个确认框
                 alert_sound()
         logger.info("本月可预约日期: {}", ", ".join(map(str, available_dates)) or "— 无 —")
         
@@ -227,7 +234,7 @@ def check_once(driver, date: str):
 
 
 # ─────────── 主流程 ───────────
-# ─────────── 主流程 ───────────
+
 def main():
     logger.info("开始检查 …")
     driver = open_browser()
@@ -244,7 +251,7 @@ def main():
                 
                 # 等待一段时间后再检查
                 for _ in tqdm(range(int(10 * real_break_interval)), desc="等待中",ncols=80, bar_format="{l_bar}{bar}| [{elapsed}<{remaining}]"):
-                    time.sleep(real_break_interval / 30)
+                    time.sleep(real_break_interval / 75)
                 # 休息完了，刷新页面
                 driver.refresh()
                 logger.info("刷新页面 …")
