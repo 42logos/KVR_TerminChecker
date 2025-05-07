@@ -27,6 +27,7 @@ import random
 
 import threading
 logger.remove()  # 移除默认的日志处理器
+sys.out.reconfigure(encoding='utf-8')  # 设置输出编码为 utf-8
 
 logger.add(
     sink="logs/{time:YYYY-MM-DD}.log",
@@ -39,8 +40,7 @@ logger.add(
 logger.add(
         sink=sys.stdout,
         level="INFO",
-        encoding="utf-8",
-
+    
     )
 
 logger.debug("Logger initialized with name: Main")
