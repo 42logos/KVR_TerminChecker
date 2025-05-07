@@ -1,4 +1,4 @@
-:: filepath: /d:/Users/yuanl/pythonProject/TerminBuchen/setup.bat
+
 @echo off
 REM Check if Python is installed
 python --version >nul 2>&1
@@ -6,7 +6,14 @@ IF %ERRORLEVEL% NEQ 0 (
     echo Python is not installed. Try install python through chocolatey.
     echo install chocolatey from https://chocolatey.org/install
     @"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -InputFormat None -ExecutionPolicy Bypass -Command "[System.Net.ServicePointManager]::SecurityProtocol = 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))" && SET "PATH=%PATH%;%ALLUSERSPROFILE%\chocolatey\bin"
-    choco install python -y
+    choco install uv -y
+    uv install python -y
+    REM Check if Python installation was successful
+    python --version >nul 2>&1
+    IF %ERRORLEVEL% NEQ 0 (
+        echo Failed to install Python.
+        exit /b %ERRORLEVEL% 
+    )
     )
 
 REM Check if chromedriver is installed
