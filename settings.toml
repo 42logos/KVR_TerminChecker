@@ -1,0 +1,8 @@
+[default]
+SERVICE_ID = "10339027"   # ← 换成你的
+LOCATION_ID = "10187259"  # ← 换成你的
+TARGET_DATE = "2025-06-07" # ← 想要点击的日期；留空则只打印可用日期
+TIMEOUT     = 20           # Selenium 显式等待秒数
+BREAK_INTERVAL = 5            # 检查间隔秒数
+RESTART_INTERVAL = 35         # 重启间隔秒数
+HEADLESS = False         # 是否无头模式

@@ -14,68 +14,87 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.common.exceptions import NoSuchElementException
+from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 
 from tqdm import tqdm
 import time
+import os
+import sys
 
-import argparse
+from loguru import logger
+logger.remove()  # 移除默认的日志处理器
+logger.add(
+    sink="logs/{time:YYYY-MM-DD}.log",
+    level="DEBUG",
+    rotation="1 day",
+    retention="7 days",
+    compression="zip",
+
+)
+logger.add(
+        sink=sys.stdout,
+        level="INFO",
+
+    )
+
+logger.debug("Logger initialized with name: Main")
+
+#设置tqdm的进度条格式
+
+
+from config import settings
 # ─────────────── 配 置 ───────────────
-SERVICE_ID = "10339027"   # ← 换成你的
-LOCATION_ID = "10187259"  # ← 换成你的
-TARGET_DATE = "2025-06-07" # ← 想要点击的日期；留空则只打印可用日期
-TIMEOUT     = 20           # Selenium 显式等待秒数
-BREAK_INTERVAL = 5            # 检查间隔秒数
-RESTART_INTERVAL = 35         # 重启间隔秒数
+SERVICE_ID = settings.default.SERVICE_ID  if settings.default.SERVICE_ID else "10339027"  # 
+LOCATION_ID = settings.default.LOCATION_ID if settings.default.LOCATION_ID else "10187259"  
+TARGET_DATE = time.strftime("%Y-%m-%d", time.localtime())  # 今天的日期
+TIMEOUT     = settings.default.TIMEOUT     if settings.default.TIMEOUT     else 10  # 等待时间
+BREAK_INTERVAL = settings.default.BREAK_INTERVAL if settings.default.BREAK_INTERVAL else 5  # 检查间隔秒数
+RESTART_INTERVAL = settings.default.RESTART_INTERVAL if settings.default.RESTART_INTERVAL else 35  # 重启间隔秒数
+HEADLESS = settings.default.HEADLESS if settings.default.HEADLESS else False  # 是否无头模式
+config = {
+    "SERVICE_ID": SERVICE_ID,
+    "LOCATION_ID": LOCATION_ID,
+    "TARGET_DATE": TARGET_DATE,
+    "TIMEOUT": TIMEOUT,
+    "BREAK_INTERVAL": BREAK_INTERVAL,
+    "RESTART_INTERVAL": RESTART_INTERVAL,
+    "HEADLESS": HEADLESS,
+    
+}
+logger.info("当前配置: {}", config)
 # ─────────────────────────────────────
 
-# 日志
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%H:%M:%S",
-)
-log = logging.getLogger(__name__)
 
-
-# ─────────── 工具：点击 Shadow DOM 内元素 ───────────
-def click_in_shadow(driver, host_css, inner_css, timeout=TIMEOUT):
-    """在 WebComponent 的 shadowRoot 内查找并点击子元素"""
-    wait = WebDriverWait(driver, timeout)
-
-
-    # 1️⃣ host 节点
-    host = wait.until(EC.presence_of_element_located(
-        (By.CSS_SELECTOR, "zms-appointment")
-    ))
-
-    # 2️⃣ Vue 把 shadowRoot 塞给它以后，再去拿 root
-    root = wait.until(lambda d: host.shadow_root)
-
-    # 3️⃣ 再等按钮真正出现在 root 里
-    btn = wait.until(lambda d: root.find_element(By.CSS_SELECTOR, "button.button-next"))
-    wait.until(EC.element_to_be_clickable(btn))
-    driver.execute_script("arguments[0].scrollIntoView({block:'center'})", btn)
-    btn.click()
-
-def find_element_in_shadow(driver, host_css, inner_css, timeout=TIMEOUT):
+# ─────────── 工具：获取 shadowRoot ───────────
+def get_shadow_element(driver, inner_css: str, timeout: int = TIMEOUT):
     """在 WebComponent 的 shadowRoot 内查找元素"""
     wait = WebDriverWait(driver, timeout)
 
-    # 1️⃣ host 节点
+    # 1️⃣ 等待 shadowRoot 出现
     host = wait.until(EC.presence_of_element_located(
-        (By.CSS_SELECTOR, host_css)
+        (By.CSS_SELECTOR, "zms-appointment")
     ))
+    
+    logger.debug("  zms-appointment 组件已加载")
+    # 2️⃣ 等待 shadowRoot 出现
 
     # 2️⃣ Vue 把 shadowRoot 塞给它以后，再去拿 root
     root = wait.until(lambda d: host.shadow_root)
+    logger.debug("  shadowRoot 已加载")
+
+
 
     # 3️⃣ 再等element真正出现在 root 里
     element = wait.until(lambda d: root.find_element(By.CSS_SELECTOR, inner_css))
-    wait.until(EC.element_to_be_clickable(element))
+    logger.debug("  找到元素: {}", inner_css)
+    # 4️⃣ 滚动到可见位置
     driver.execute_script("arguments[0].scrollIntoView({block:'center'})", element) # 滚动到可见位置
+    logger.debug("  滚动到可见位置")
+    # 5️⃣ 返回元素
     return element
 
+# ─────────── 工具：判断日期按钮是否可用 ───────────
 def is_day_enabled(root, day: int) -> bool:
     """
     在已定位到的日历 shadow_root（或 container）中，
@@ -93,7 +112,7 @@ def is_day_enabled(root, day: int) -> bool:
 
     # 2) 两种方式判断是否可用：
     # 方法 A: Selenium 提供的 is_enabled()
-    log.info("日期 %s 可用: %s", day, btn.is_enabled())
+    logger.debug("  日期 {} 可用: {}", day, btn.is_enabled())
     return btn.is_enabled()
 
 # ─────────── 工具：播放警告 ───────────
@@ -105,12 +124,43 @@ def alert_sound():
     while True:
         winsound.Beep(frequency, duration)
 
+# ─────────── 工具：保存当前完整网页源代码 以供分析 ───────────
+def save_page_source(driver, filename: str = "page_source.html"):
+    """保存当前页面的完整源代码"""
+    
+    wait=WebDriverWait(driver, TIMEOUT)
+    # 等待页面加载完成
+    host=wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "zms-appointment")))
+    # 等待 shadowRoot 出现
+    root = shadow_html = driver.execute_script(
+    "return arguments[0].shadowRoot.innerHTML", 
+    host
+)
+    
+    # 获取当前页面的完整源代码
+    page_source = driver.page_source
+    # 将 shadowRoot 的 HTML 代码添加到页面源代码中,
+    page_source = page_source.replace("<zms-appointment service-id=\"10339027\" location-id=\"10187259\">", f"<zms-appointment service-id={SERVICE_ID} location-id={LOCATION_ID}>\n{shadow_html}")
+    # 保存到文件
+    with open(filename, "w", encoding="utf-8") as f:
+        f.write(page_source)
+    # 打印保存成功的消息
+    logger.debug("保存当前页面的完整源代码到 {}", filename)
+
 
 # ─────────── 打开浏览器 ───────────
 def open_browser():
     opts = webdriver.ChromeOptions()
     opts.add_argument("--log-level=3")                          # 静音 USB 报警
     opts.add_experimental_option("excludeSwitches", ["enable-logging"])
+    opts.add_argument("--disable-infobars")                  # 隐藏提示条
+    opts.add_argument("--disable-extensions")                # 禁用扩展
+    opts.add_argument("--disable-popup-blocking")            # 禁用弹窗拦截
+    opts.add_argument("--no-sandbox")                     # 解决 DevToolsActivePort 文件不存在的报错
+    opts.add_argument("--disable-dev-shm-usage") # 解决 DevToolsActivePort 文件不存在的报错
+    opts.add_argument("--headless") if settings.default.HEADLESS else None  # 无头模式
+    opts.add_argument("--disable-gpu") if settings.default.HEADLESS else None  # 无头模式
+    
 
     service = Service(ChromeDriverManager().install(), log_level="INFO")
     return webdriver.Chrome(service=service, options=opts)
@@ -121,84 +171,83 @@ def check_once(driver, date: str):
         "https://www48.muenchen.de/buergeransicht"
         f"#/services/{SERVICE_ID}/locations/{LOCATION_ID}"
     )
-    log.info("打开页面: %s", url)
+    logger.debug("打开页面: {}", url)
     driver.get(url)
 
     try:
-        # 1) 组件加载
-        WebDriverWait(driver, TIMEOUT).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "zms-appointment"))
-        )
-        log.info("zms-appointment 组件已加载")
 
         # 2) 点击『Weiter zur Terminsuche』/ 下一步
-        log.info("点击『Weiter / Nächster Schritt』按钮 …")
-        click_in_shadow(
+        logger.info("尝试点击『Weiter / Nächster Schritt』按钮 …")
+        next_btn = get_shadow_element(
             driver,
-            host_css="zms-appointment",          # 不变
-            inner_css="button.button-next",      # ⬅︎✅ 正确 selector
+            inner_css="button.m-button.m-button--primary.m-button--animated-right.button-next",
         )
-
+        next_btn.click()
+        logger.info("点击成功")
         # 3) 读取日历：所有可用日期按钮带 data-date 属性且未 disabled
-        wait = WebDriverWait(driver, TIMEOUT)
-        # root = wait.until(lambda d: host.shadow_root)
-        host = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "zms-appointment")))
-        log.info("zms-appointment 组件已加载")
-        # 等 shadowRoot 出现
-        shadow = driver.execute_script("return arguments[0].shadowRoot", host)
-        log.info("shadowRoot 已加载")
-        # 等日历组件出现
+
 
         # 日历组件 <zms-calendar> 也在 Shadow DOM
-        root = wait.until(lambda d: host.shadow_root)
-        calendar = find_element_in_shadow(
+        logger.info("尝试加载日历组件 …")
+        calendar = get_shadow_element(
             driver,
-            host_css="zms-appointment",
             inner_css="table",           # 只为了拿到 shadowRoot
         )
-        log.info("日历组件已加载")
+        logger.info("日历组件已加载")
         
+        logger.info("尝试分析日历 …")
         available_dates = []
         for day in range(1, 32):
             if is_day_enabled(calendar, day):
+                logger.info("日期 {} 可用", day)
+                save_page_source(driver, f"page_source_{day}.html")
                 available_dates.append(day)
-        log.info("本月可预约日期: %s", ", ".join(map(str, available_dates)) or "— 无 —")
-        
-        if available_dates:
-            alert_sound()
-            log.info("有可预约日期！")
-
+                alert_sound()
+        logger.info("本月可预约日期: {}", ", ".join(map(str, available_dates)) or "— 无 —")
+        save_page_source(driver, "page_source.html")
 
     except Exception as e:
-        log.exception("执行过程中出错: %s", e)
+        logger.exception("执行过程中出错: {}", e)
     finally:
-        log.info("结束")
+        logger.debug("结束")
 
 
 # ─────────── 主流程 ───────────
 def main():
-    log.info("开始检查 …")
+    logger.info("开始检查 …")
     driver = open_browser()
     while True:
         try:
                 driver.refresh()
-                log.info("检查可预约日期 …")
+                logger.info("检查可预约日期 …")
                 check_once(driver, TARGET_DATE)
 
                 # 等待一段时间后再检查
-                log.info("等待 %s 秒后继续 …", BREAK_INTERVAL)
+                logger.info("等待 {} 秒后继续 …", BREAK_INTERVAL)
                 for _ in tqdm(range(int(10 * BREAK_INTERVAL)), desc="等待中",ncols=80, bar_format="{l_bar}{bar}| [{elapsed}<{remaining}]"):
                     time.sleep(BREAK_INTERVAL / 30)
                 # 休息完了，刷新页面
                 driver.refresh()
-                log.info("刷新页面 …")
+                logger.info("刷新页面 …")
         except KeyboardInterrupt:
-            log.info("检测中断，退出 …")
+            logger.info("检测到手动中断，退出 …")
+            break
         except Exception as e:
-            log.exception("执行过程中出错: %s", e)
+            logger.exception("执行过程中出错: {}", e)
 
-        log.info("结束")
-    
+        logger.info("结束")
+    try :
+        driver.quit()
+        logger.info("浏览器已关闭")
+    except Exception as e:
+        logger.exception("关闭浏览器时出错: {}", e)
+        #强制关闭浏览器
+        os.system("taskkill /f /im chrome.exe")
+        logger.info("强制关闭浏览器")
+
+    logger.info("结束")
+    logger.info("程序已完成")
+
 
 if __name__ == "__main__":
     main()
