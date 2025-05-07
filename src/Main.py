@@ -170,7 +170,8 @@ def open_browser():
     opts.add_argument("--disable-dev-shm-usage") # 解决 DevToolsActivePort 文件不存在的报错
     opts.add_argument("--headless=new") if settings.default.HEADLESS else None  # 无头模式
     opts.add_argument("--disable-gpu") if settings.default.HEADLESS else None  # 无头模式
-    opts.opts.add_argument("--remote-debugging-port=9222") # 远程调试端口
+    opts.add_argument("--remote-debugging-port=9222") # 远程调试端口
+    
 
     service = Service(ChromeDriverManager().install(), log_level="INFO")
     return webdriver.Chrome(service=service, options=opts)
