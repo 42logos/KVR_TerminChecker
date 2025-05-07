@@ -165,16 +165,12 @@ def save_page_source(driver, filename: str):
 # ─────────── 打开浏览器 ───────────
 def open_browser():
     opts = webdriver.ChromeOptions()
-    opts.add_argument("--log-level=3")                          # 静音 USB 报警
     opts.add_experimental_option("excludeSwitches", ["enable-logging"])
-    opts.add_argument("--disable-infobars")                  # 隐藏提示条
-    opts.add_argument("--disable-extensions")                # 禁用扩展
-    opts.add_argument("--disable-popup-blocking")            # 禁用弹窗拦截
     opts.add_argument("--no-sandbox")                     # 解决 DevToolsActivePort 文件不存在的报错
     opts.add_argument("--disable-dev-shm-usage") # 解决 DevToolsActivePort 文件不存在的报错
-    opts.add_argument("--headless") if settings.default.HEADLESS else None  # 无头模式
+    opts.add_argument("--headless=new") if settings.default.HEADLESS else None  # 无头模式
     opts.add_argument("--disable-gpu") if settings.default.HEADLESS else None  # 无头模式
-    opts.add_argument("--user-data-dir=C:/Temp/ChromeProfile")
+    opts.opts.add_argument("--remote-debugging-port=9222") # 远程调试端口
 
     service = Service(ChromeDriverManager().install(), log_level="INFO")
     return webdriver.Chrome(service=service, options=opts)
