@@ -16,6 +16,16 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.common.exceptions import (
+    StaleElementReferenceException,
+    ElementClickInterceptedException,
+    ElementNotInteractableException,
+    TimeoutException,
+    WebDriverException,
+    InvalidArgumentException
+)
+from selenium.webdriver.support import expected_conditions as EC
 
 from tqdm import tqdm
 import time
@@ -72,7 +82,7 @@ logger.info("当前配置: {}", config)
 
 
 # ─────────── 工具：获取 shadowRoot ───────────
-def get_shadow_element(driver, inner_css: str, timeout: int = TIMEOUT):
+def get_shadow_element(driver, selector: str, inner_css: str, timeout: int = TIMEOUT):
     """在 WebComponent 的 shadowRoot 内查找元素"""
     wait = WebDriverWait(driver, timeout)
 
@@ -92,10 +102,15 @@ def get_shadow_element(driver, inner_css: str, timeout: int = TIMEOUT):
     logger.debug("  shadowRoot 已加载")
     
     # 3️⃣ 再等element真正出现在 root 里
-    element = wait.until(lambda d: root.find_element(By.CSS_SELECTOR, inner_css))
+    try:
+        element = wait.until(lambda d: root.find_elements(selector, inner_css))
+    except InvalidArgumentException:
+        # 可能是因为没有找到元素，导致 InvalidArgumentException
+        logger.info("  选择器无效: {}", selector)
+        raise InvalidArgumentException(f"选择器无效: {selector}")
     logger.debug("  找到元素: {}", inner_css)
     # 4️⃣ 滚动到可见位置
-    driver.execute_script("arguments[0].scrollIntoView({block:'center'})", element) # 滚动到可见位置
+    driver.execute_script("arguments[0].scrollIntoView({block:'center'})", element[0]) # 滚动到可见位置
     logger.debug("  滚动到可见位置")
     # 5️⃣ 返回元素
     return element
@@ -161,6 +176,71 @@ def save_page_source(driver, filename: str):
         f.write(shadow_html)
     logger.debug("  保存当前页面源代码到: {}", filename)
 
+# ─────────── 工具: 处理具体时间 ───────────
+def select_appointment(driver, idx: int = 0, timeout: int = TIMEOUT):
+    """
+    点击具体的预约时间按钮"""
+    #driver.get("http://127.0.0.1:5500/page_source_8_ac.html") # 模拟加载本地文件
+    
+    # 2) 再抓一次列表（避免 stale）
+    slots = get_shadow_element(driver, By.CSS_SELECTOR, inner_css="div.select-appointment")
+    
+    #列出所有时间按钮
+    logger.info("  可用时间:")
+    slottexts=[slot.text.strip() for slot in slots]
+    logger.info("  {}", slottexts)
+
+    # 3) 找到目标元素
+    if not idx==-1:
+        if idx>=len(slots):
+            raise RuntimeError(f"索引超出范围: {idx} > {len(slots)}")
+        target = slots[idx]  # 直接使用索引获取目标元素
+        save_page_source(driver, f"page_source_{target.text.strip()}.html")  # 保存当前页面源代码
+        safe_click(driver, target, target.text.strip(), timeout=timeout)
+    else:
+        logger.info("选择所有时间按钮")
+        for slot in slots:
+           safe_click(driver, slot, slot.text.strip(), timeout=timeout)
+        logger.info("已成功点击所有时间按钮")
+        
+    
+# ─────────── 工具：安全点击元素 ───────────
+def safe_click(driver, element, time_str, timeout=TIMEOUT):
+    """滚动到 element 并尝试点击，失败时降级到 JS 点击"""
+
+    try:
+        ActionChains(driver).move_to_element(element).perform()
+        html = element.get_attribute("outerHTML")  # 这里可能会抛异常
+    except StaleElementReferenceException:
+        logger.warning("元素已失效，尝试重新获取...")
+        # 重新获取 shadow DOM 中的所有按钮
+        elements = get_shadow_element(driver, By.CSS_SELECTOR, "div.select-appointment")
+        element = next((el for el in elements if el.text.strip() == time_str), None)
+        if not element:
+            raise RuntimeError(f"重新获取元素失败：{time_str}")
+        html = element.get_attribute("outerHTML")
+
+    logger.info("  滚动到元素: {}", html)
+
+    # 确保元素可见 & 可点击
+    WebDriverWait(driver, timeout).until(
+        lambda d: element.is_displayed() and element.is_enabled()
+    )
+
+    # 2) 尝试原生 click
+    try:
+        element.click()
+    except (ElementClickInterceptedException,
+            ElementNotInteractableException,
+            WebDriverException) as e:
+        print(f"原生 click 失败 → {e.__class__.__name__}: {e.msg.splitlines()[0]}")
+        try:
+            driver.execute_script("arguments[0].click();", element)
+        except StaleElementReferenceException:
+            raise RuntimeError("元素再次失效，点击失败")
+
+    print(f"已成功点击 {time_str}")
+
 
 # ─────────── 打开浏览器 ───────────
 def open_browser():
@@ -171,6 +251,8 @@ def open_browser():
     opts.add_argument("--headless=new") if settings.default.HEADLESS else None  # 无头模式
     opts.add_argument("--disable-gpu") if settings.default.HEADLESS else None  # 无头模式
     opts.add_argument("--remote-debugging-port=9222") # 远程调试端口
+    opts.add_argument("--proxy-server=127.0.0.1:8080") # 代理服务器
+   # opts.add_argument("--ignore-certificate-errors") # 忽略证书错误
     
 
     service = Service(ChromeDriverManager().install(), log_level="INFO")
@@ -191,8 +273,9 @@ def check_once(driver, date: str):
         logger.info("尝试点击『Weiter / Nächster Schritt』按钮 …")
         next_btn = get_shadow_element(
             driver,
+            By.CSS_SELECTOR,
             inner_css="button.m-button.m-button--primary.m-button--animated-right.button-next",
-        )
+        )[0]  # 只取第一个元素
         next_btn.click()
         logger.info("点击成功")
         # 3) 读取日历：所有可用日期按钮带 data-date 属性且未 disabled
@@ -203,8 +286,9 @@ def check_once(driver, date: str):
         # driver.get("E:\Programming_Projects\KVR_TerminChecker\page_source_7.html") # 模拟加载本地文件
         calendar = get_shadow_element(
             driver,
+            By.CSS_SELECTOR,
             inner_css="table",           # 只为了拿到 shadowRoot
-        )
+        )[0]  # 只取第一个元素
         # calendar = driver.find_element(By.CSS_SELECTOR, "table")
         save_page_source(driver, "page_source_calendar.html")
         logger.info("日历组件已加载")
@@ -214,18 +298,30 @@ def check_once(driver, date: str):
     
         for day in range(1, 32):
             if is_day_enabled(calendar, day):
+                alert_thread = threading.Thread(target=alert_sound)
+                alert_thread.start()
+                
                 logger.info("日期 {} 可用", day)
                 save_page_source(driver, f"page_source_{day}.html")  
                 available_dates.append(day)
+                
+                ## 4) 点击日期按钮
                 click_day(calendar, day)
                 save_page_source(driver, f"page_source_{day}_clicked.html")
-                # 点击日期按钮后，可能会弹出一个确认框
-                alert_sound()
+                
+                # 5) 点击时间按钮
+                select_appointment(driver, idx=2)  # 选择第3个时间按钮
+                save_page_source(driver, f"page_source_{day}_clicked_time.html")
+                
+                while True:
+                    pass
+
+                ui8999999999999999999999999999999999999999999999999999999999999999999999999[ppppppppppppppp]
         logger.info("本月可预约日期: {}", ", ".join(map(str, available_dates)) or "— 无 —")
         
 
     except Exception as e:
-        logger.exception("执行过程中出错: {}", e)
+        logger.exception("单次执行过程中出错: {}", e)
     finally:
         logger.debug("结束")
 
@@ -263,10 +359,16 @@ def main():
                 time.sleep(RESTART_INTERVAL / 150)
             # 休息完了，重启浏览器
             driver.quit()
+            try:
+                os.system("taskkill /f /im chrome.exe")
+            except Exception as e:
+                logger.exception("强制关闭浏览器失败: {}", e)
+            # 重新打开浏览器
             driver = open_browser()
             logger.info("重启浏览器 …")
 
         logger.info("结束")
+        
 
     logger.info("强制关闭浏览器")
     #强制关闭浏览器

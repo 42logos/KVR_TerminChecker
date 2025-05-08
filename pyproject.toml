@@ -20,6 +20,7 @@ dependencies = [
     "pycparser==2.22",
     "pyguru>=0.0.3",
     "pysocks==1.7.1",
+    "pytest>=8.3.5",
     "python-dotenv==1.1.0",
     "pywin32==308",
     "requests==2.32.3",
@@ -36,3 +37,7 @@ dependencies = [
     "win32-setctime>=1.2.0",
     "wsproto==1.2.0",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
