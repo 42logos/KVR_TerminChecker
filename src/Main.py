@@ -202,6 +202,16 @@ def select_appointment(driver, idx: int = 0, timeout: int = TIMEOUT):
         for slot in slots:
            safe_click(driver, slot, slot.text.strip(), timeout=timeout)
         logger.info("已成功点击所有时间按钮")
+
+
+#─────────── 工具: 点击Kontaktdatenangeben ───────────
+def click_kontakt(driver, timeout=TIMEOUT):
+    """点击『Kontaktdaten angeben』按钮"""
+    # 1) 等待按钮加载完成
+    element= get_shadow_element(driver, By.CSS_SELECTOR, inner_css="button.v-expansion-panel-header")[0]  # 只取第一个元素
+    
+    safe_click(driver, element, "Kontaktdaten angeben", timeout=timeout)
+    logger.info("已成功点击『Kontaktdaten angeben』按钮")
         
     
 # ─────────── 工具：安全点击元素 ───────────
@@ -309,14 +319,15 @@ def check_once(driver, date: str):
                 click_day(calendar, day)
                 save_page_source(driver, f"page_source_{day}_clicked.html")
                 
+                ## 5) 点击 Kontaktdaten angeben 按钮
+                click_kontakt(driver, timeout=TIMEOUT)
+                
                 # 5) 点击时间按钮
                 select_appointment(driver, idx=2)  # 选择第3个时间按钮
                 save_page_source(driver, f"page_source_{day}_clicked_time.html")
                 
                 while True:
                     pass
-
-                ui8999999999999999999999999999999999999999999999999999999999999999999999999[ppppppppppppppp]
         logger.info("本月可预约日期: {}", ", ".join(map(str, available_dates)) or "— 无 —")
         
 
