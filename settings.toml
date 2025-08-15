@@ -1,8 +1,12 @@
 [default]
-SERVICE_ID = "10339027"   # ← 换成你的
-LOCATION_ID = "10187259"  # ← 换成你的
-TARGET_DATE = "2025-06-07" # ← 想要点击的日期；留空则只打印可用日期
-TIMEOUT = 10           # Selenium 显式等待秒数
-BREAK_INTERVAL = 2    # 检查间隔秒数
-RESTART_INTERVAL = 15  # 重启间隔秒数
-HEADLESS = true     # 是否无头模式
+Appointment_idx = 4 # Index of the appointment to check, starting from 0
+HEADLESS = false # Set to true if you want to run hide the browser window
+SERVICE_ID = "10339027"
+LOCATION_ID = "10187259"
+TARGET_DATE = "2025-08-15"
+TIMEOUT = 15 # how long to wait for the shadow element to appear
+BREAK_INTERVAL = 1 # how long to wait before checking again
+RESTART_INTERVAL = 5 # how long to wait before restarting the program if error occurs
+KontaktClick = true # Set to true if you want to click the contact button
+proxy = false # Set to true if you want to use a proxy
+
