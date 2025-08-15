@@ -75,6 +75,9 @@ config = {
     "BREAK_INTERVAL": BREAK_INTERVAL,
     "RESTART_INTERVAL": RESTART_INTERVAL,
     "HEADLESS": HEADLESS,
+    "KontaktClick": settings.default.KontaktClick,
+    "Appointment_idx": settings.default.Appointment_idx,
+    "proxy": settings.default.PROXY,
     
 }
 logger.info("当前配置: {}", config)
@@ -170,6 +173,9 @@ def save_page_source(driver, filename: str):
     "return arguments[0].shadowRoot.innerHTML", 
         driver.find_element(By.CSS_SELECTOR, "zms-appointment")
     )
+    # insert current full config to filename
+    filename = filename.replace(".html", f"_{settings.default.SERVICE_ID}_{settings.default.LOCATION_ID}_{settings.default.Appointment_idx}.html")
+
 
     # 2) 保存到文件
     with open(filename, "w", encoding="utf-8") as f:
@@ -251,18 +257,32 @@ def safe_click(driver, element, time_str, timeout=TIMEOUT):
 
     print(f"已成功点击 {time_str}")
 
+def js_click(driver, element):
+    """使用 JS 点击元素"""
+    try:
+        driver.execute_script("arguments[0].click();", element)
+    except StaleElementReferenceException:
+        raise RuntimeError("元素失效，点击失败")
+    logger.info("  使用 JS 点击元素: {}", element.get_attribute("outerHTML"))
+    # 3) 等待弹窗出现
 
 # ─────────── 打开浏览器 ───────────
 def open_browser():
+    
+    #checking if chrome is installed
+
+    
+    
     opts = webdriver.ChromeOptions()
     opts.add_experimental_option("excludeSwitches", ["enable-logging"])
     opts.add_argument("--no-sandbox")                     # 解决 DevToolsActivePort 文件不存在的报错
     opts.add_argument("--disable-dev-shm-usage") # 解决 DevToolsActivePort 文件不存在的报错
-    opts.add_argument("--headless=new") if settings.default.HEADLESS else None  # 无头模式
+    opts.add_argument("--headless") if settings.default.HEADLESS else None  # 无头模式
     opts.add_argument("--disable-gpu") if settings.default.HEADLESS else None  # 无头模式
-    opts.add_argument("--remote-debugging-port=9222") # 远程调试端口
-    opts.add_argument("--proxy-server=127.0.0.1:8080") # 代理服务器
-   # opts.add_argument("--ignore-certificate-errors") # 忽略证书错误
+    #opts.add_argument("--remote-debugging-port=9222") # 远程调试端口
+    opts.add_argument("--proxy-server=127.0.0.1:8080") if settings.default.PROXY else None  # 代理服务器
+    opts.add_argument("--ignore-certificate-errors")  # 允许忽略证书错误
+    opts.add_argument("--disable-blink-features=AutomationControlled") # 禁用自动化提示
     
 
     service = Service(ChromeDriverManager().install(), log_level="INFO")
@@ -276,71 +296,85 @@ def check_once(driver, date: str):
     )
     logger.debug("打开页面: {}", url)
     driver.get(url)
-
-    try:
-
-        # 2) 点击『Weiter zur Terminsuche』/ 下一步
-        logger.info("尝试点击『Weiter / Nächster Schritt』按钮 …")
-        next_btn = get_shadow_element(
-            driver,
-            By.CSS_SELECTOR,
-            inner_css="button.m-button.m-button--primary.m-button--animated-right.button-next",
-        )[0]  # 只取第一个元素
-        next_btn.click()
-        logger.info("点击成功")
-        # 3) 读取日历：所有可用日期按钮带 data-date 属性且未 disabled
-
-
-        # 日历组件 <zms-calendar> 也在 Shadow DOM
-        logger.info("尝试加载日历组件 …")
-        # driver.get("E:\Programming_Projects\KVR_TerminChecker\page_source_7.html") # 模拟加载本地文件
-        calendar = get_shadow_element(
-            driver,
-            By.CSS_SELECTOR,
-            inner_css="table",           # 只为了拿到 shadowRoot
-        )[0]  # 只取第一个元素
-        # calendar = driver.find_element(By.CSS_SELECTOR, "table")
-        save_page_source(driver, "page_source_calendar.html")
-        logger.info("日历组件已加载")
-        
-        logger.info("尝试分析日历 …")
-        available_dates = []
     
-        for day in range(1, 32):
-            if is_day_enabled(calendar, day):
-                alert_thread = threading.Thread(target=alert_sound)
-                alert_thread.start()
-                
-                logger.info("日期 {} 可用", day)
-                save_page_source(driver, f"page_source_{day}.html")  
-                available_dates.append(day)
-                
-                ## 4) 点击日期按钮
-                click_day(calendar, day)
-                save_page_source(driver, f"page_source_{day}_clicked.html")
-                
-                ## 5) 点击 Kontaktdaten angeben 按钮
-                click_kontakt(driver, timeout=TIMEOUT)
-                
-                # 5) 点击时间按钮
-                select_appointment(driver, idx=2)  # 选择第3个时间按钮
-                save_page_source(driver, f"page_source_{day}_clicked_time.html")
-                
-                while True:
-                    pass
-        logger.info("本月可预约日期: {}", ", ".join(map(str, available_dates)) or "— 无 —")
+    # 1) 尝试点击captcha checkbox
+    captch_css="div.altcha-checkbox"
+    try:
+        captcha = get_shadow_element(driver, By.CSS_SELECTOR, inner_css=captch_css, timeout=3)[0]  # 只取第一个元素
+        logger.info("尝试点击验证码复选框 …")
+        time.sleep(random.uniform(0.5, 1.5))  # 等待一段时间，模拟人类操作
+        captcha.click()
+        logger.info("点击成功")
+    except NoSuchElementException:
+        logger.info("验证码复选框未找到，跳过")
+    except TimeoutException:
+        logger.info("验证码复选框加载超时，跳过")
+
+    # 2) 点击『Weiter zur Terminsuche』/ 下一步
+    logger.info("尝试点击『Weiter / Nächster Schritt』按钮 …")
+    next_btn = get_shadow_element(
+        driver,
+        By.CSS_SELECTOR,
+        inner_css="button.button-next",
+    )[0]  # 只取第一个元素
+    safe_click(driver, next_btn, "Weiter / Nächster Schritt", timeout=TIMEOUT)
+    logger.info("点击成功")
+    # 3) 读取日历：所有可用日期按钮带 data-date 属性且未 disabled
+
+
+    # 日历组件 <zms-calendar> 也在 Shadow DOM
+    logger.info("尝试加载日历组件 …")
+    # driver.get("E:\Programming_Projects\KVR_TerminChecker\page_source_7.html") # 模拟加载本地文件
+    calendar = get_shadow_element(
+        driver,
+        By.CSS_SELECTOR,
+        inner_css="table",           # 只为了拿到 shadowRoot
+    )[0]  # 只取第一个元素
+    # calendar = driver.find_element(By.CSS_SELECTOR, "table")
+    # save_page_source(driver, "page_source_calendar.html")
+    logger.info("日历组件已加载")
+    
+    logger.info("尝试分析日历 …")
+    available_dates = []
+
+    for day in range(1, 32):
+        if is_day_enabled(calendar, day):
+            alert_thread = threading.Thread(target=alert_sound)
+            alert_thread.start()
+            
+            logger.info("日期 {} 可用", day)
+            available_dates.append(day)
+            
+            ## 4) 点击日期按钮
+            click_day(calendar, day)
+            # save_page_source(driver, f"page_source_{day}_clicked.html")
+            
+    
+            
+            # 5) 点击时间按钮
+            select_appointment(driver, idx=settings.default.Appointment_idx, timeout=TIMEOUT) 
+            save_page_source(driver, f"page_source_{day}_clicked_time.html")
+            
+            # 6) 点击『Kontaktdaten angeben』按钮
+            click_kontakt(driver, timeout=TIMEOUT) if settings.default.KontaktClick else None
+            save_page_source(driver, f"page_source_{day}_clicked_kontakt.html") if settings.default.KontaktClick else None
+            
+            
+            while True:
+                pass
+    logger.info("本月可预约日期: {}", ", ".join(map(str, available_dates)) or "— 无 —")
         
 
-    except Exception as e:
-        logger.exception("单次执行过程中出错: {}", e)
-    finally:
-        logger.debug("结束")
 
 
 # ─────────── 主流程 ───────────
-
+from utils import is_available
 def main():
     logger.info("开始检查 …")
+    while not is_available():
+        logger.info("预约系统不可用，等待 5 秒后重试 …")
+        time.sleep(0.1)
+    logger.info("预约系统可用，开始检查可预约日期 …")
     driver = open_browser()
     while True:
         try:
@@ -363,23 +397,33 @@ def main():
             logger.info("检测到手动中断，退出 …")
             break
         except Exception as e:
-            logger.exception("执行过程中出错: {}", e)
-            logger.info("等待 {} 秒后重启 …", RESTART_INTERVAL)
-            # 等待一段时间后重启浏览器
-            for _ in tqdm(range(int(RESTART_INTERVAL)*10), desc="等待中",ncols=80, bar_format="{l_bar}{bar}| [{elapsed}<{remaining}]"):
-                time.sleep(RESTART_INTERVAL / 150)
-            # 休息完了，重启浏览器
-            driver.quit()
             try:
-                os.system("taskkill /f /im chrome.exe")
+                logger.exception("执行过程中出错: {}", e)
+                logger.info("等待 {} 秒后重启 …", RESTART_INTERVAL)
+                # 等待一段时间后重启浏览器
+                for _ in tqdm(range(int(RESTART_INTERVAL)*10), desc="等待中",ncols=80, bar_format="{l_bar}{bar}| [{elapsed}<{remaining}]"):
+                    time.sleep(RESTART_INTERVAL / 150)
+                # 休息完了，重启浏览器
+                driver.quit()
+                try:
+                    pass
+                    #os.system("taskkill /f /im chrome.exe")
+                except Exception as e:
+                    logger.exception("强制关闭浏览器失败: {}", e)
+                # 重新打开浏览器
+                driver = open_browser()
+                logger.info("重启浏览器 …")
+            except KeyboardInterrupt:
+                logger.info("检测到手动中断，退出 …")
+                break
             except Exception as e:
-                logger.exception("强制关闭浏览器失败: {}", e)
-            # 重新打开浏览器
-            driver = open_browser()
-            logger.info("重启浏览器 …")
+                logger.exception("重启浏览器失败: {}", e)
+                logger.info("尝试强制关闭浏览器 …")
 
-        logger.info("结束")
-        
+                os.system("taskkill /f /im chrome.exe")
+        finally:
+            logger.info("结束")
+    
 
     logger.info("强制关闭浏览器")
     #强制关闭浏览器
