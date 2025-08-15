@@ -28,7 +28,16 @@ def get_available_days(start_date, end_date, office_id, service_id, service_coun
     if captcha_token!= None:
         params['captchaToken'] = captcha_token
     else:
-        params['captchaToken'] = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpcCI6IjJhMDI6ODEwZDo5YTU6YjAwMDpiMTUyOjcyZGU6NTdkNjplOTFkIiwiaWF0IjoxNzU1MjE1MDg5LCJleHAiOjE3NTUyMTUzODl9.PsL-o9vlEvFFaxxcaiws8zNeImYQizFIgC3Npz51dQo"
+        file = "token.txt"
+        try:
+            with open(file, 'r') as f:
+                token = f.read().strip()
+                if token:
+                    params['captchaToken'] = token
+                else:
+                    raise ValueError("Captcha token is empty, please get a new token.")
+        except FileNotFoundError:
+            raise ValueError("Captcha token file not found, please get a new token.")
     headers = {
         'Host': 'www48.muenchen.de',
         'Sec-Ch-Ua': '"Chromium";v="125", "Not.A/Brand";v="24"',
@@ -114,35 +123,32 @@ def get_captcha_token():
         response = requests.post(url, headers=headers, json=payload)
         if response.status_code == 200:
             data = response.json()
-            return data.get('token')
+            token = data.get('token')
+            file= "token.txt"
+            with open(file, 'w') as f:
+                f.write(token) if token else f.write("No token received")
+                
+            return token
         return None
     except requests.RequestException as e:
         print(f"Error getting captcha token: {e}")
         return None
 # Example usage
 if __name__ == "__main__":
-    # response = get_available_days(
-    #     start_date="2025-08-15",
-    #     end_date="2026-02-15", 
-    #     office_id="10187259",
-    #     service_id="10339027",
-    # )
-    # print(f"Status: {response.status_code}")
-    # print(f"Response: {response.text}")
-    
-    # print(f"Available: {is_available()}")
-    
-    # example for getting captcha token if the old one is expired
-    token = get_captcha_token()
-    print(f"Captcha Token: {token}")
-    
     response = get_available_days(
         start_date="2025-08-15",
-        end_date="2026-02-15",
+        end_date="2026-02-15", 
         office_id="10187259",
         service_id="10339027",
-        service_count=1,
-        captcha_token=token
     )
     print(f"Status: {response.status_code}")
     print(f"Response: {response.text}")
+    
+    print(f"Available: {is_available()}")
+    
+    # example for getting captcha token if the old one is expired
+    # token = get_captcha_token()
+    # print(f"Captcha Token: {token}")
+    
+
+
