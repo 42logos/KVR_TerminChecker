@@ -57,7 +57,8 @@ logger.debug("Logger initialized with name: Main")
 
 #设置tqdm的进度条格式
 
-
+import sys,pathlib
+sys.path.append(str(pathlib.Path(__file__).parent.parent.resolve()))  # 添加 src 目录到 sys.path
 from config import settings
 # ─────────────── 配 置 ───────────────
 SERVICE_ID = settings.default.SERVICE_ID  if settings.default.SERVICE_ID else "10339027"  # 
@@ -371,9 +372,10 @@ def check_once(driver, date: str):
 from utils import is_available
 def main():
     logger.info("开始检查 …")
+    refresh_interval = 0.5
     while not is_available():
-        logger.info("预约系统不可用，等待 5 秒后重试 …")
-        time.sleep(0.1)
+        logger.info(f"预约系统不可用，等待 {refresh_interval} 秒后重试 …")
+        time.sleep(random.uniform(refresh_interval * 0.7, refresh_interval * 1.3))  # 等待一段时间后重试
     logger.info("预约系统可用，开始检查可预约日期 …")
     driver = open_browser()
     while True:

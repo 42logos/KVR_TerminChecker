@@ -80,7 +80,9 @@ def is_available():
         if len(data.keys()) == 1 and 'errors' in data.keys():
             if data['errors'][0]['errorCode'] == "captchaExpired" or data['errors'][0]['errorCode'] == "captchaInvalid":
                 print(json.dumps(data, indent=4, ensure_ascii=False))
-                raise ValueError("Captcha expired, please get a new token.")
+                get_captcha_token()  # Get a new captcha token if expired or invalid
+                print("Captcha expired or invalid, please get a new token, then run the program again.")
+                return False
             else:
                 return False
     except requests.RequestException as e:
@@ -135,20 +137,20 @@ def get_captcha_token():
         return None
 # Example usage
 if __name__ == "__main__":
-    response = get_available_days(
-        start_date="2025-08-15",
-        end_date="2026-02-15", 
-        office_id="10187259",
-        service_id="10339027",
-    )
-    print(f"Status: {response.status_code}")
-    print(f"Response: {response.text}")
+    # response = get_available_days(
+    #     start_date="2025-08-15",
+    #     end_date="2026-02-15", 
+    #     office_id="10187259",
+    #     service_id="10339027",
+    # )
+    # print(f"Status: {response.status_code}")
+    # print(f"Response: {response.text}")
     
-    print(f"Available: {is_available()}")
+    # print(f"Available: {is_available()}")
     
     # example for getting captcha token if the old one is expired
-    # token = get_captcha_token()
-    # print(f"Captcha Token: {token}")
+    token = get_captcha_token()
+    print(f"Captcha Token: {token}")
     
 
 
